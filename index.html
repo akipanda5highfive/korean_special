@@ -120,9 +120,71 @@ function qa(w){
 }
 function show(){let w=current();session.answered=false;session.qa=qa(w);session.mode=$('mode').value==='mix'?(Math.random()<.5?'choice':'input'):$('mode').value;$('progress').textContent=`${session.index+1} / ${session.queue.length}`;$('question').textContent=session.qa.q;$('question').style.fontSize=(session.qa.q.length<=2)?'clamp(3rem,14vw,5.6rem)':'clamp(1.8rem,7vw,3rem)';$('prompt').textContent=session.qa.prompt;$('hanjaHint').textContent='';$('feedback').innerHTML='';$('beforeActions').classList.remove('hidden');$('afterActions').classList.add('hidden');showFav();$('answerInput').value='';$('answerInput').classList.toggle('korean-input',/ko$/.test(session.qa.dir)||session.qa.dir==='ja-ko');if(session.mode==='choice')showChoices();else{$('choices').innerHTML='';$('inputArea').classList.remove('hidden');setTimeout(()=>$('answerInput').focus(),100)}}
 function answerOptions(w){if(category==='hanja')return session.qa.dir==='kanji-ko'?w.ko:w.kanji;return session.qa.dir==='ko-ja'?w.ja:w.ko}
-function showChoices(){$('inputArea').classList.add('hidden');let w=current(),correct=session.qa.a;let source=(category==='hanja'?HANJA:WORDS).filter(x=>x.id!==w.id);let others=[];for(let x of shuffle(source)){let v=answerOptions(x);if(v!==correct&&!others.includes(v))others.push(v);if(others.length===3)break}$('choices').innerHTML=shuffle([correct,...others]).map(x=>`<button class="choice">${x}</button>`).join('');[...$('choices').children].forEach(b=>b.onclick=()=>answer(b.textContent,b))}
-function isCorrect(value,correct){let v=normalize(value);if(category==='hanja'&&session.qa.dir==='kanji-ko')return variants(correct).includes(v);if(category==='words'&&session.qa.dir==='ko-ja')return String(correct).split('・').some(x=>normalize(x)===v)||normalize(correct)===v;return normalize(correct)===v}
-function answer(value,btn){if(session.answered)return;session.answered=true;let w=current(),correctAnswer=session.qa.a,ok=isCorrect(value,correctAnswer);state.attempts++;if(ok){state.correct++;session.score++}else{if(!session.wrong.includes(w.id))session.wrong.push(w.id);if(!state.wrong.includes(w.id))state.wrong.push(w.id)}if(btn){[...$('choices').children].forEach(b=>{if(normalize(b.textContent)===normalize(correctAnswer))b.classList.add('correct')});if(!ok)btn.classList.add('wrong')}$('feedback').innerHTML=`<div class="${ok?'good':'bad'}">${ok?'○ 正解！':'× 正解は '+correctAnswer}<br><span style="font-size:.92rem">${session.qa.display}</span></div>`;$('hanjaHint').textContent=category==='hanja'?`${w.grade}級`:(w.hanja.startsWith('固有語')?w.hanja:`漢字：${w.hanja}`);$('beforeActions').classList.add('hidden');$('afterActions').classList.remove('hidden');save()}
+function optionKeys(value){
+  if(category==='hanja'&&session.qa.dir==='kanji-ko')return variants(value);
+  return [normalize(value)];
+}
+function optionsOverlap(a,b){
+  let ak=optionKeys(a),bk=optionKeys(b);
+  return ak.some(x=>bk.includes(x));
+}
+function showChoices(){
+  $('inputArea').classList.add('hidden');
+  let w=current(),correct=session.qa.a;
+  let source=(category==='hanja'?HANJA:WORDS).filter(x=>x.id!==w.id);
+  let others=[];
+  for(let x of shuffle(source)){
+    let v=answerOptions(x);
+    if(!v||optionsOverlap(v,correct)||others.some(o=>optionsOverlap(o,v)))continue;
+    others.push(v);
+    if(others.length===3)break;
+  }
+  $('choices').innerHTML=shuffle([correct,...others]).map(x=>`<button class="choice">${x}</button>`).join('');
+  [...$('choices').children].forEach(b=>b.onclick=()=>answer(b.textContent,b));
+}
+function isCorrect(value,correct){
+  let v=normalize(value),full=normalize(correct);
+  if(category==='hanja'&&session.qa.dir==='kanji-ko'){
+    return v===full||variants(correct).includes(v);
+  }
+  if(category==='words'&&session.qa.dir==='ko-ja'){
+    return String(correct).split('・').some(x=>normalize(x)===v)||full===v;
+  }
+  return full===v;
+}
+function announceMultipleReadings(correctAnswer){
+  if(category!=='hanja'||session.qa.dir!=='kanji-ko')return '';
+  let readings=variants(correctAnswer);
+  if(readings.length<2)return '';
+  let shown=`読み：${readings.join(' または ')}`;
+  speechSynthesis.cancel();
+  let u=new SpeechSynthesisUtterance(readings.join(' 또는 '));
+  u.lang='ko-KR';
+  u.rate=.78;
+  speechSynthesis.speak(u);
+  return `<br><span style="font-size:1.08rem;font-weight:900">${shown}</span>`;
+}
+function answer(value,btn){
+  if(session.answered)return;
+  session.answered=true;
+  let w=current(),correctAnswer=session.qa.a,ok=isCorrect(value,correctAnswer);
+  state.attempts++;
+  if(ok){state.correct++;session.score++}
+  else{
+    if(!session.wrong.includes(w.id))session.wrong.push(w.id);
+    if(!state.wrong.includes(w.id))state.wrong.push(w.id);
+  }
+  if(btn){
+    [...$('choices').children].forEach(b=>{if(isCorrect(b.textContent,correctAnswer))b.classList.add('correct')});
+    if(!ok)btn.classList.add('wrong');
+  }
+  let multipleNote=ok?announceMultipleReadings(correctAnswer):'';
+  $('feedback').innerHTML=`<div class="${ok?'good':'bad'}">${ok?'○ 正解！':'× 正解は '+correctAnswer}${multipleNote}<br><span style="font-size:.92rem">${session.qa.display}</span></div>`;
+  $('hanjaHint').textContent=category==='hanja'?`${w.grade}級`:(w.hanja.startsWith('固有語')?w.hanja:`漢字：${w.hanja}`);
+  $('beforeActions').classList.add('hidden');
+  $('afterActions').classList.remove('hidden');
+  save();
+}
 function dontKnow(){answer('___')}function next(){if(!session.answered)return;if(++session.index>=session.queue.length)finish();else show()}
 function finish(){$('quiz').classList.add('hidden');$('result').classList.remove('hidden');$('resultBig').textContent=`${session.score} / ${session.queue.length}`;$('resultText').textContent=`正答率 ${Math.round(session.score/session.queue.length*100)}%　間違い ${session.wrong.length}問`;$('retryBtn').disabled=!session.wrong.length}
 function back(){$('result').classList.add('hidden');$('setup').classList.remove('hidden')}
